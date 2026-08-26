@@ -5,7 +5,7 @@ const SYSTEM_PROMPT = `당신은 사용자가 산책 중 직접 쓴 감성 기�
 
 {
   "tags": ["태그1", "태그2", "태그3"],
-  "mood": "고정된 카테고리 없이, 글의 분위기를 표현하는 1~3단어짜리 자유로운 무드 표현 (예: '노곤한 저녁', '낯선 설렘')"
+  "mood": "쉼표나 나열 없이, 글의 분위기를 표현하는 1~3단어짜리 하나의 짧은 무드 표현 (예: '노곤한 저녁', '낯선 설렘')"
 }`;
 
 export async function POST(req: NextRequest) {
@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
     }
 
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
