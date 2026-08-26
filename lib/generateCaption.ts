@@ -21,3 +21,23 @@ export async function generateCaption(
 
   return res.json();
 }
+
+export type TagResult = {
+  tags: string[];
+  mood: string;
+};
+
+export async function generateTagsFromText(text: string): Promise<TagResult> {
+  const res = await fetch("/api/retag", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "태그·무드 재생성에 실패했습니다.");
+  }
+
+  return res.json();
+}

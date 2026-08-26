@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { compressImage, reverseGeocode } from "@/lib/file";
-import { generateCaption, type CaptionResult } from "@/lib/generateCaption";
+import { generateCaption, generateTagsFromText, type CaptionResult } from "@/lib/generateCaption";
 
 const MapPicker = dynamic(() => import("@/components/MapPicker"), { ssr: false });
 
@@ -23,6 +23,11 @@ export default function CapturePage() {
   const [locationName, setLocationName] = useState<string | null>(null);
   const [geoStatus, setGeoStatus] = useState<"idle" | "locating" | "ok" | "denied">("idle");
   const [result, setResult] = useState<CaptionResult | null>(null);
+  const [captionDraft, setCaptionDraft] = useState("");
+  const [tagsDraft, setTagsDraft] = useState<string[]>([]);
+  const [moodDraft, setMoodDraft] = useState("");
+  const [retagging, setRetagging] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(false);
 
@@ -78,10 +83,30 @@ export default function CapturePage() {
     try {
       const res = await generateCaption(compressed.base64, "image/jpeg");
       setResult(res);
+      setCaptionDraft(res.caption);
+      setTagsDraft(res.tags);
+      setMoodDraft(res.mood);
+      setDirty(false);
       setStep("result");
     } catch (e) {
       setError(e instanceof Error ? e.message : "캡션 생성에 실패했습니다.");
       setStep("preview");
+    }
+  }
+
+  async function regenerateTags() {
+    if (!captionDraft.trim()) return;
+    setRetagging(true);
+    setError(null);
+    try {
+      const res = await generateTagsFromText(captionDraft.trim());
+      setTagsDraft(res.tags);
+      setMoodDraft(res.mood);
+      setDirty(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "태그·무드 재생성에 실패했습니다.");
+    } finally {
+      setRetagging(false);
     }
   }
 
@@ -116,9 +141,9 @@ export default function CapturePage() {
     const { error: insertError } = await supabase.from("walk_records").insert({
       user_id: user.id,
       photo_url: publicUrl,
-      caption: result.caption,
-      tags: result.tags,
-      mood: result.mood,
+      caption: captionDraft.trim(),
+      tags: tagsDraft,
+      mood: moodDraft.trim(),
       lat: coords.lat,
       lng: coords.lng,
       location_name: locationName,
@@ -303,22 +328,53 @@ export default function CapturePage() {
             <div className="aspect-[4/5] rounded-2xl overflow-hidden bg-accent-soft flex-shrink-0">
               <img src={previewUrl} alt="result" className="w-full h-full object-cover" />
             </div>
-            <div className="font-serif text-[17px] leading-relaxed text-foreground">
-              {result.caption}
-            </div>
-            <div className="flex gap-1.5 flex-wrap">
-              {result.tags.map((tag) => (
-                <div
-                  key={tag}
-                  className="font-mono text-[11px] text-accent bg-accent-soft px-2.5 py-1 rounded-full"
-                >
-                  {tag}
+            <textarea
+              value={captionDraft}
+              onChange={(e) => {
+                setCaptionDraft(e.target.value);
+                setDirty(true);
+              }}
+              rows={3}
+              placeholder="AI가 쓴 문장을 내 이야기로 고쳐보세요"
+              className="font-serif text-[17px] leading-relaxed text-foreground bg-surface border border-border rounded-xl p-3 resize-none outline-none focus:border-accent"
+            />
+
+            <div className="flex flex-col gap-1.5">
+              <div className="flex gap-1.5 flex-wrap items-center">
+                {tagsDraft.map((tag) => (
+                  <div
+                    key={tag}
+                    className="font-mono text-[11px] text-accent bg-accent-soft px-2.5 py-1 rounded-full"
+                  >
+                    {tag}
+                  </div>
+                ))}
+                <div className="font-mono text-[11px] text-[oklch(0.5_0.1_85)] bg-[oklch(0.94_0.05_85)] px-3 py-1 rounded-full">
+                  {moodDraft}
                 </div>
-              ))}
+              </div>
+              {dirty && (
+                <div className="font-mono text-[10px] text-muted">
+                  글이 수정됐어요 · 태그·무드는 아직 이전 내용 기준이에요
+                </div>
+              )}
             </div>
-            <div className="self-start font-mono text-[11px] text-[oklch(0.5_0.1_85)] bg-[oklch(0.94_0.05_85)] px-3 py-1.5 rounded-full">
-              {result.mood}
-            </div>
+
+            <button
+              onClick={regenerateTags}
+              disabled={retagging || !captionDraft.trim()}
+              className="self-start flex items-center gap-1.5 text-[12.5px] font-semibold text-accent disabled:opacity-50"
+            >
+              {retagging ? (
+                <>
+                  <div className="w-3 h-3 rounded-full border-2 border-accent-soft border-t-accent animate-spin" />
+                  다시 분석하는 중...
+                </>
+              ) : (
+                "✎ 내 글에 맞게 태그·무드 다시 생성"
+              )}
+            </button>
+
             {error && <div className="text-sm text-red-600">{error}</div>}
             <button
               onClick={save}
