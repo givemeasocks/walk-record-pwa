@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { fileToBase64, reverseGeocode } from "@/lib/file";
+import { compressImage, reverseGeocode } from "@/lib/file";
 import { generateCaption, type CaptionResult } from "@/lib/generateCaption";
 
 const MapPicker = dynamic(() => import("@/components/MapPicker"), { ssr: false });
@@ -17,19 +17,29 @@ export default function CapturePage() {
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState<Step>("select");
-  const [file, setFile] = useState<File | null>(null);
+  const [compressed, setCompressed] = useState<{ blob: Blob; base64: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
   const [geoStatus, setGeoStatus] = useState<"idle" | "locating" | "ok" | "denied">("idle");
   const [result, setResult] = useState<CaptionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [preparing, setPreparing] = useState(false);
 
-  function pickFile(f: File) {
-    setFile(f);
-    setPreviewUrl(URL.createObjectURL(f));
-    setStep("preview");
-    locate();
+  async function pickFile(f: File) {
+    setError(null);
+    setPreparing(true);
+    try {
+      const c = await compressImage(f);
+      setCompressed(c);
+      setPreviewUrl(URL.createObjectURL(c.blob));
+      setStep("preview");
+      locate();
+    } catch {
+      setError("사진을 처리하지 못했습니다. 다른 사진으로 시도해주세요.");
+    } finally {
+      setPreparing(false);
+    }
   }
 
   function locate() {
@@ -53,7 +63,7 @@ export default function CapturePage() {
   }
 
   function retake() {
-    setFile(null);
+    setCompressed(null);
     setPreviewUrl(null);
     setCoords(null);
     setLocationName(null);
@@ -62,12 +72,11 @@ export default function CapturePage() {
   }
 
   async function usePhoto() {
-    if (!file || !coords) return;
+    if (!compressed || !coords) return;
     setStep("analyzing");
     setError(null);
     try {
-      const base64 = await fileToBase64(file);
-      const res = await generateCaption(base64, file.type);
+      const res = await generateCaption(compressed.base64, "image/jpeg");
       setResult(res);
       setStep("result");
     } catch (e) {
@@ -77,7 +86,7 @@ export default function CapturePage() {
   }
 
   async function save() {
-    if (!file || !coords || !result) return;
+    if (!compressed || !coords || !result) return;
     setStep("saving");
     setError(null);
     const supabase = createClient();
@@ -89,11 +98,10 @@ export default function CapturePage() {
       return;
     }
 
-    const ext = file.type.split("/")[1] || "jpg";
-    const path = `${user.id}/${Date.now()}.${ext}`;
+    const path = `${user.id}/${Date.now()}.jpg`;
     const { error: uploadError } = await supabase.storage
       .from("walk-photos")
-      .upload(path, file, { contentType: file.type });
+      .upload(path, compressed.blob, { contentType: "image/jpeg" });
 
     if (uploadError) {
       setError("사진 업로드에 실패했습니다: " + uploadError.message);
@@ -159,18 +167,27 @@ export default function CapturePage() {
             <div className="font-serif text-lg font-semibold text-foreground">기록하기</div>
           </div>
           <div className="flex-1 flex flex-col justify-center gap-4 px-7">
+            {error && <div className="text-sm text-red-600 text-center">{error}</div>}
             <button
               onClick={() => cameraInputRef.current?.click()}
-              className="h-[130px] rounded-2xl border-[1.5px] border-dashed border-border bg-surface flex flex-col items-center justify-center gap-2.5"
+              disabled={preparing}
+              className="h-[130px] rounded-2xl border-[1.5px] border-dashed border-border bg-surface flex flex-col items-center justify-center gap-2.5 disabled:opacity-50"
             >
-              <div className="w-[34px] h-[26px] border-[2.2px] border-accent rounded-md flex items-center justify-center">
-                <div className="w-3 h-3 rounded-full border-[2.2px] border-accent" />
+              {preparing ? (
+                <div className="w-6 h-6 rounded-full border-[2.5px] border-border border-t-accent animate-spin" />
+              ) : (
+                <div className="w-[34px] h-[26px] border-[2.2px] border-accent rounded-md flex items-center justify-center">
+                  <div className="w-3 h-3 rounded-full border-[2.2px] border-accent" />
+                </div>
+              )}
+              <div className="text-[14.5px] font-semibold text-foreground">
+                {preparing ? "사진 준비 중..." : "카메라로 촬영"}
               </div>
-              <div className="text-[14.5px] font-semibold text-foreground">카메라로 촬영</div>
             </button>
             <button
               onClick={() => galleryInputRef.current?.click()}
-              className="h-[130px] rounded-2xl border-[1.5px] border-dashed border-border bg-surface flex flex-col items-center justify-center gap-2.5"
+              disabled={preparing}
+              className="h-[130px] rounded-2xl border-[1.5px] border-dashed border-border bg-surface flex flex-col items-center justify-center gap-2.5 disabled:opacity-50"
             >
               <div className="w-[34px] h-[26px] border-[2.2px] border-[oklch(0.60_0.09_230)] rounded-md" />
               <div className="text-[14.5px] font-semibold text-foreground">갤러리에서 선택</div>
